@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e
+set -ex
 
 appSetup () {
 
@@ -9,12 +9,14 @@ appSetup () {
 	DOMAINPASS=${DOMAINPASS:-youshouldsetapassword}
 	JOIN=${JOIN:-false}
 	JOINSITE=${JOINSITE:-NONE}
+	if [ ! -z ${JOINSERVER} ]; then JOINSERVER="--server=${JOINSERVER}"; fi
 	MULTISITE=${MULTISITE:-false}
 	NOCOMPLEXITY=${NOCOMPLEXITY:-false}
 	INSECURELDAP=${INSECURELDAP:-false}
 	DNSFORWARDER=${DNSFORWARDER:-NONE}
 	HOSTIP=${HOSTIP:-NONE}
-	
+	EDIT_SAMBA_CONF=${EDIT_SAMBA_CONF:-false}
+
 	LDOMAIN=${DOMAIN,,}
 	UDOMAIN=${DOMAIN^^}
 	URDOMAIN=${UDOMAIN%%.*}
@@ -40,17 +42,29 @@ appSetup () {
 	echo "    dns_lookup_realm = false" >> /etc/krb5.conf
 	echo "    dns_lookup_kdc = true" >> /etc/krb5.conf
 	echo "    default_realm = ${UDOMAIN}" >> /etc/krb5.conf
+
+
 	# If the finished file isn't there, this is brand new, we're not just moving to a new container
 	if [[ ! -f /etc/samba/external/smb.conf ]]; then
-		mv /etc/samba/smb.conf /etc/samba/smb.conf.orig
+		test -f /etc/samba/smb.conf && mv -f /etc/samba/smb.conf /etc/samba/smb.conf.orig
 		if [[ ${JOIN,,} == "true" ]]; then
-			if [[ ${JOINSITE} == "NONE" ]]; then
-				samba-tool domain join ${LDOMAIN} DC -U"${URDOMAIN}\administrator" --password="${DOMAINPASS}" --dns-backend=SAMBA_INTERNAL
+			if [[ ${JOIN_WITH_KERBEROS,,} == "true" ]]; then
+				echo ${DOMAINPASS} | kinit Administrator
+				if [[ ${JOINSITE} == "NONE" ]]; then
+					samba-tool domain join ${LDOMAIN} DC -k yes --dns-backend=SAMBA_INTERNAL ${JOINSERVER}
+				else
+					samba-tool domain join ${LDOMAIN} DC -k yes --dns-backend=SAMBA_INTERNAL --site=${JOINSITE} ${JOINSERVER}
+				fi
 			else
-				samba-tool domain join ${LDOMAIN} DC -U"${URDOMAIN}\administrator" --password="${DOMAINPASS}" --dns-backend=SAMBA_INTERNAL --site=${JOINSITE}
+
+			  if [[ ${JOINSITE} == "NONE" ]]; then
+			  	samba-tool domain join ${LDOMAIN} DC -U"${URDOMAIN}\administrator" --password=${DOMAINPASS} --dns-backend=SAMBA_INTERNAL ${JOINSERVER}
+			  else
+			  	samba-tool domain join ${LDOMAIN} DC -U"${URDOMAIN}\administrator" --password=${DOMAINPASS} --dns-backend=SAMBA_INTERNAL --site=${JOINSITE} ${JOINSERVER}
+			  fi
 			fi
 		else
-			samba-tool domain provision --use-rfc2307 --domain=${URDOMAIN} --realm=${UDOMAIN} --server-role=dc --dns-backend=SAMBA_INTERNAL --adminpass=${DOMAINPASS} ${HOSTIP_OPTION}
+			samba-tool domain provision --use-rfc2307 --domain=${URDOMAIN} --realm=${UDOMAIN} --server-role=dc --dns-backend=SAMBA_INTERNAL --adminpass=${DOMAINPASS} ${HOSTIP_OPTION} ${JOINSERVER}
 			if [[ ${NOCOMPLEXITY,,} == "true" ]]; then
 				samba-tool domain passwordsettings set --complexity=off
 				samba-tool domain passwordsettings set --history-length=0
@@ -58,30 +72,33 @@ appSetup () {
 				samba-tool domain passwordsettings set --max-pwd-age=0
 			fi
 		fi
-		sed -i "/\[global\]/a \
-			\\\tidmap_ldb:use rfc2307 = yes\\n\
-			wins support = yes\\n\
-			template shell = /bin/bash\\n\
-			winbind nss info = rfc2307\\n\
-			idmap config ${URDOMAIN}: range = 10000-20000\\n\
-			idmap config ${URDOMAIN}: backend = ad\
-			" /etc/samba/smb.conf
-		if [[ $DNSFORWARDER != "NONE" ]]; then
-			sed -i "/\[global\]/a \
-				\\\tdns forwarder = ${DNSFORWARDER}\
-				" /etc/samba/smb.conf
-		fi
-		if [[ ${INSECURELDAP,,} == "true" ]]; then
-			sed -i "/\[global\]/a \
-				\\\tldap server require strong auth = no\
-				" /etc/samba/smb.conf
+
+		if [[ ${EDIT_SAMBA_CONF,,} == "true" ]]; then
+		  sed -i "/\[global\]/a \
+		  	\\\tidmap_ldb:use rfc2307 = yes\\n\
+		  	wins support = yes\\n\
+		  	template shell = /bin/bash\\n\
+		  	winbind nss info = rfc2307\\n\
+		  	idmap config ${URDOMAIN}: range = 10000-20000\\n\
+		  	idmap config ${URDOMAIN}: backend = ad\
+		  	" /etc/samba/smb.conf
+		  if [[ $DNSFORWARDER != "NONE" ]]; then
+		  	sed -i "/\[global\]/a \
+		  		\\\tdns forwarder = ${DNSFORWARDER}\
+		  		" /etc/samba/smb.conf
+		  fi
+		  if [[ ${INSECURELDAP,,} == "true" ]]; then
+		  	sed -i "/\[global\]/a \
+		  		\\\tldap server require strong auth = no\
+		  		" /etc/samba/smb.conf
+		  fi
 		fi
 		# Once we are set up, we'll make a file so that we know to use it if we ever spin this up again
-		cp /etc/samba/smb.conf /etc/samba/external/smb.conf
+		test -f /etc/samba/smb.conf && cp /etc/samba/smb.conf /etc/samba/external/smb.conf
 	else
-		cp /etc/samba/external/smb.conf /etc/samba/smb.conf
+		[ -w /path/to/file ] && cp -f /etc/samba/external/smb.conf /etc/samba/smb.conf
 	fi
-        
+
 	# Set up supervisor
 	echo "[supervisord]" > /etc/supervisor/conf.d/supervisord.conf
 	echo "nodaemon=true" >> /etc/supervisor/conf.d/supervisord.conf
@@ -96,7 +113,7 @@ appSetup () {
 		echo "[program:openvpn]" >> /etc/supervisor/conf.d/supervisord.conf
 		echo "command=/usr/sbin/openvpn --config /docker.ovpn" >> /etc/supervisor/conf.d/supervisord.conf
 	fi
-	
+
 	appStart
 }
 
@@ -107,7 +124,7 @@ appStart () {
 case "$1" in
 	start)
 		if [[ -f /etc/samba/external/smb.conf ]]; then
-			cp /etc/samba/external/smb.conf /etc/samba/smb.conf
+			[ -w /path/to/file ] && cp /etc/samba/external/smb.conf /etc/samba/smb.conf
 			appStart
 		else
 			echo "Config file is missing."
