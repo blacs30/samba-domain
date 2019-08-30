@@ -96,7 +96,7 @@ appSetup () {
 		# Once we are set up, we'll make a file so that we know to use it if we ever spin this up again
 		test -f /etc/samba/smb.conf && cp /etc/samba/smb.conf /etc/samba/external/smb.conf
 	else
-		[ -w /path/to/file ] && cp -f /etc/samba/external/smb.conf /etc/samba/smb.conf
+		[ -w /etc/samba/external/smb.conf ] && cp -f /etc/samba/external/smb.conf /etc/samba/smb.conf
 	fi
 
 	# Set up supervisor
