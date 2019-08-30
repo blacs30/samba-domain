@@ -1,6 +1,11 @@
 #!/bin/bash
+if [ ! -z $DEBUG ]; then
+    set -x
+fi
+if [ ! -z $FAILONERROR ]; then
+    set -e
+fi
 
-set -ex
 
 appSetup () {
 
