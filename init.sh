@@ -46,7 +46,7 @@ appSetup () {
 
 	# If the finished file isn't there, this is brand new, we're not just moving to a new container
 	if [[ ! -f /etc/samba/external/smb.conf ]]; then
-		test -f /etc/samba/smb.conf && mv -f /etc/samba/smb.conf /etc/samba/smb.conf.orig
+		  test -f /etc/samba/smb.conf && [ -w /etc/samba/smb.conf ] && mv -f /etc/samba/smb.conf /etc/samba/smb.conf.orig
 		if [[ ${JOIN,,} == "true" ]]; then
 			if [[ ${JOIN_WITH_KERBEROS,,} == "true" ]]; then
 				echo ${DOMAINPASS} | kinit Administrator
