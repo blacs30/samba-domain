@@ -6,6 +6,12 @@ if [ ! -z $FAILONERROR ]; then
     set -e
 fi
 
+# reload samba daily to reduce memory usage
+if [[ "$SET_CRON" != "OFF" ]]; then 
+  echo '#!/bin/sh' > /etc/cron.daily/restartsamba
+  echo 'supervisorctl reload samba' >> /etc/cron.daily/restartsamba
+fi
+
 
 appSetup () {
 
