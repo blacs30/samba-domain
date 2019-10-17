@@ -10,6 +10,8 @@ fi
 if [[ "$SET_CRON" != "OFF" ]]; then 
   echo '#!/bin/sh' > /etc/cron.daily/restartsamba
   echo 'supervisorctl reload samba' >> /etc/cron.daily/restartsamba
+  chmod +x /etc/cron.daily/restartsamba
+  service cron start
 fi
 
 
