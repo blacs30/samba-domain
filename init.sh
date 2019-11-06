@@ -23,6 +23,7 @@ appSetup () {
   JOIN=${JOIN:-false}
   JOINSITE=${JOINSITE:-NONE}
   if [ ! -z "${JOINSERVER}" ]; then JOINSERVER="--server=${JOINSERVER}"; fi
+  if [ ! -z "${MORE_PARAMETER}" ]; then MORE_PARAMETER="${MORE_PARAMETER}"; fi
   MULTISITE=${MULTISITE:-false}
   NOCOMPLEXITY=${NOCOMPLEXITY:-false}
   INSECURELDAP=${INSECURELDAP:-false}
