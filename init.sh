@@ -1,8 +1,8 @@
 #!/bin/bash
-if [ ! -z $DEBUG ]; then
+if [ ! -z "$DEBUG" ]; then
     set -x
 fi
-if [ ! -z $FAILONERROR ]; then
+if [ ! -z "$FAILONERROR" ]; then
     set -e
 fi
 
@@ -22,7 +22,7 @@ appSetup () {
   DOMAINPASS=${DOMAINPASS:-youshouldsetapassword}
   JOIN=${JOIN:-false}
   JOINSITE=${JOINSITE:-NONE}
-  if [ ! -z ${JOINSERVER} ]; then JOINSERVER="--server=${JOINSERVER}"; fi
+  if [ ! -z "${JOINSERVER}" ]; then JOINSERVER="--server=${JOINSERVER}"; fi
   MULTISITE=${MULTISITE:-false}
   NOCOMPLEXITY=${NOCOMPLEXITY:-false}
   INSECURELDAP=${INSECURELDAP:-false}
@@ -64,20 +64,20 @@ appSetup () {
       if [[ ${JOIN_WITH_KERBEROS,,} == "true" ]]; then
         echo ${DOMAINPASS} | kinit Administrator
         if [[ ${JOINSITE} == "NONE" ]]; then
-          samba-tool domain join ${LDOMAIN} DC -k yes --dns-backend=SAMBA_INTERNAL ${JOINSERVER}
+            samba-tool domain join ${LDOMAIN} DC -k yes --dns-backend=SAMBA_INTERNAL ${JOINSERVER} ${MORE_PARAMETER}
         else
-          samba-tool domain join ${LDOMAIN} DC -k yes --dns-backend=SAMBA_INTERNAL --site=${JOINSITE} ${JOINSERVER}
+            samba-tool domain join ${LDOMAIN} DC -k yes --dns-backend=SAMBA_INTERNAL --site=${JOINSITE} ${JOINSERVER} ${MORE_PARAMETER}
         fi
       else
 
         if [[ ${JOINSITE} == "NONE" ]]; then
-          samba-tool domain join ${LDOMAIN} DC -U"${URDOMAIN}\administrator" --password=${DOMAINPASS} --dns-backend=SAMBA_INTERNAL ${JOINSERVER}
+            samba-tool domain join ${LDOMAIN} DC -U"${URDOMAIN}\administrator" --password=${DOMAINPASS} --dns-backend=SAMBA_INTERNAL ${JOINSERVER} ${MORE_PARAMETER}
         else
-          samba-tool domain join ${LDOMAIN} DC -U"${URDOMAIN}\administrator" --password=${DOMAINPASS} --dns-backend=SAMBA_INTERNAL --site=${JOINSITE} ${JOINSERVER}
+            samba-tool domain join ${LDOMAIN} DC -U"${URDOMAIN}\administrator" --password=${DOMAINPASS} --dns-backend=SAMBA_INTERNAL --site=${JOINSITE} ${JOINSERVER} ${MORE_PARAMETER}
         fi
       fi
     else
-      samba-tool domain provision --use-rfc2307 --domain=${URDOMAIN} --realm=${UDOMAIN} --server-role=dc --dns-backend=SAMBA_INTERNAL --adminpass=${DOMAINPASS} ${HOSTIP_OPTION} ${JOINSERVER}
+        samba-tool domain provision --use-rfc2307 --domain=${URDOMAIN} --realm=${UDOMAIN} --server-role=dc --dns-backend=SAMBA_INTERNAL --adminpass=${DOMAINPASS} ${HOSTIP_OPTION} ${MORE_PARAMETER}
       if [[ ${NOCOMPLEXITY,,} == "true" ]]; then
         samba-tool domain passwordsettings set --complexity=off
         samba-tool domain passwordsettings set --history-length=0
