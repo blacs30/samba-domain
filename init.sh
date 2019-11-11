@@ -6,6 +6,8 @@ if [ ! -z "$FAILONERROR" ]; then
     set -e
 fi
 
+cp -f /etc/freeradius/mods-available/detail.log.tpl /etc/freeradius/mods-available/detail.log
+
 # reload samba daily to reduce memory usage
 if [[ "$SET_CRON" != "OFF" ]]; then
   echo '#!/bin/sh' > /etc/cron.daily/restartsamba
@@ -23,7 +25,6 @@ appSetup () {
   JOIN=${JOIN:-false}
   JOINSITE=${JOINSITE:-NONE}
   if [ ! -z "${JOINSERVER}" ]; then JOINSERVER="--server=${JOINSERVER}"; fi
-  if [ ! -z "${MORE_PARAMETER}" ]; then MORE_PARAMETER="${MORE_PARAMETER}"; fi
   MULTISITE=${MULTISITE:-false}
   NOCOMPLEXITY=${NOCOMPLEXITY:-false}
   INSECURELDAP=${INSECURELDAP:-false}
@@ -34,6 +35,8 @@ appSetup () {
   LDOMAIN=${DOMAIN,,}
   UDOMAIN=${DOMAIN^^}
   URDOMAIN=${UDOMAIN%%.*}
+
+  FREERADIUS=${FREERADIUS:-NONE}
 
   # If multi-site, we need to connect to the VPN before joining the domain
   if [[ ${MULTISITE,,} == "true" ]]; then
@@ -65,20 +68,20 @@ appSetup () {
       if [[ ${JOIN_WITH_KERBEROS,,} == "true" ]]; then
         echo ${DOMAINPASS} | kinit Administrator
         if [[ ${JOINSITE} == "NONE" ]]; then
-            samba-tool domain join ${LDOMAIN} DC -k yes --dns-backend=SAMBA_INTERNAL ${JOINSERVER} ${MORE_PARAMETER}
+            samba-tool domain join ${LDOMAIN} DC -k yes --dns-backend=SAMBA_INTERNAL ${JOINSERVER} --option="bind interfaces only=yes" --option="interfaces=lo ${BIND_IF}"
         else
-            samba-tool domain join ${LDOMAIN} DC -k yes --dns-backend=SAMBA_INTERNAL --site=${JOINSITE} ${JOINSERVER} ${MORE_PARAMETER}
+            samba-tool domain join ${LDOMAIN} DC -k yes --dns-backend=SAMBA_INTERNAL --site=${JOINSITE} ${JOINSERVER} --option="bind interfaces only=yes" --option="interfaces=lo ${BIND_IF}"
         fi
       else
 
         if [[ ${JOINSITE} == "NONE" ]]; then
-            samba-tool domain join ${LDOMAIN} DC -U"${URDOMAIN}\administrator" --password=${DOMAINPASS} --dns-backend=SAMBA_INTERNAL ${JOINSERVER} ${MORE_PARAMETER}
+            samba-tool domain join ${LDOMAIN} DC -U"${URDOMAIN}\administrator" --password=${DOMAINPASS} --dns-backend=SAMBA_INTERNAL ${JOINSERVER} --option="bind interfaces only=yes" --option="interfaces=lo ${BIND_IF}"
         else
-            samba-tool domain join ${LDOMAIN} DC -U"${URDOMAIN}\administrator" --password=${DOMAINPASS} --dns-backend=SAMBA_INTERNAL --site=${JOINSITE} ${JOINSERVER} ${MORE_PARAMETER}
+            samba-tool domain join ${LDOMAIN} DC -U"${URDOMAIN}\administrator" --password=${DOMAINPASS} --dns-backend=SAMBA_INTERNAL --site=${JOINSITE} ${JOINSERVER} --option="bind interfaces only=yes" --option="interfaces=lo ${BIND_IF}"
         fi
       fi
     else
-        samba-tool domain provision --use-rfc2307 --domain=${URDOMAIN} --realm=${UDOMAIN} --server-role=dc --dns-backend=SAMBA_INTERNAL --adminpass=${DOMAINPASS} ${HOSTIP_OPTION} ${MORE_PARAMETER}
+        samba-tool domain provision --use-rfc2307 --domain=${URDOMAIN} --realm=${UDOMAIN} --server-role=dc --dns-backend=SAMBA_INTERNAL --adminpass=${DOMAINPASS} ${HOSTIP_OPTION}
       if [[ ${NOCOMPLEXITY,,} == "true" ]]; then
         samba-tool domain passwordsettings set --complexity=off
         samba-tool domain passwordsettings set --history-length=0
@@ -111,9 +114,19 @@ appSetup () {
     fi
 
     # Once we are set up, we'll make a file so that we know to use it if we ever spin this up again
-    test -f /etc/samba/smb.conf && cp /etc/samba/smb.conf /etc/samba/external/smb.conf
+    if [[ ${FREERADIUS,,} == "true" ]]; then
+        test -f /provided/smb.conf && cp -v /provided/smb.conf /etc/samba/smb.conf
+        test -f /etc/samba/smb.conf && cp -v /etc/samba/smb.conf /etc/samba/external/smb.conf
+    else
+        test -f /etc/samba/smb.conf && cp -v /etc/samba/smb.conf /etc/samba/external/smb.conf
+    fi
+
   else
-    [ -w /etc/samba/smb.conf ] && cp -f /etc/samba/external/smb.conf /etc/samba/smb.conf
+      if [[ ${FREERADIUS,,} == "true" ]]; then
+          [ -w /etc/samba/smb.conf ] && test -f /provided/smb.conf && cp -v /provided/smb.conf /etc/samba/smb.conf
+      else
+          [ -w /etc/samba/smb.conf ] && cp -v /etc/samba/external/smb.conf /etc/samba/smb.conf
+      fi
   fi
 
   # Set up supervisor
@@ -130,6 +143,12 @@ appSetup () {
     echo "[program:openvpn]" >> /etc/supervisor/conf.d/supervisord.conf
     echo "command=/usr/sbin/openvpn --config /docker.ovpn" >> /etc/supervisor/conf.d/supervisord.conf
   fi
+  if [[ ${FREERADIUS,,} == "true" ]]; then
+      echo "" >> /etc/supervisor/conf.d/supervisord.conf
+      echo "[program:freeradius]" >> /etc/supervisor/conf.d/supervisord.conf
+      echo "command=/usr/sbin/freeradius -f" >> /etc/supervisor/conf.d/supervisord.conf
+  fi
+
 
   appStart
 }
@@ -138,10 +157,65 @@ appStart () {
   /usr/bin/supervisord
 }
 
+function clients_config {
+    local CONF=/etc/freeradius/clients.conf
+    if [ ! -z $FREERADIUS_CLIENT_HOST ]; then
+        cp -f ${CONF}.tpl ${CONF}
+        echo $FREERADIUS_CLIENT_HOST
+        sed -i "s/FREERADIUS_CLIENT_HOST/$FREERADIUS_CLIENT_HOST/g" ${CONF}
+    else
+        return 0
+    fi
+
+    if [ ! -z $FREERADIUS_CLIENT_SECRET ]; then
+        echo $FREERADIUS_CLIENT_SECRET
+        sed -i "s/FREERADIUS_CLIENT_SECRET/$FREERADIUS_CLIENT_SECRET/g" ${CONF}
+    fi
+}
+
+function proxy_config {
+    local CONF=/etc/freeradius/proxy.conf
+    if [ ! -z $FREERADIUS_PROXY_SECRET ]; then
+        cp -f ${CONF}.tpl ${CONF}
+        echo $FREERADIUS_PROXY_SECRET
+        sed -i "s/FREERADIUS_PROXY_SECRET/$FREERADIUS_PROXY_SECRET/g" ${CONF}
+    else
+        return 0
+    fi
+
+    if [ ! -z $FREERADIUS_ACCOUNT_HOST ]; then
+        echo $FREERADIUS_ACCOUNT_HOST
+        sed -i "s/FREERADIUS_ACCOUNT_HOST/$FREERADIUS_ACCOUNT_HOST/g" ${CONF}
+    fi
+}
+
+function eap_config {
+    local CONF=/etc/freeradius/mods-available/eap
+    if [ ! -z $SSL_PRIV_KEY_PASSWORD ]; then
+        cp -f ${CONF}.tpl ${CONF}
+        echo $SSL_PRIV_KEY_PASSWORD
+        sed -i "s/SSL_PRIV_KEY_PASSWORD/$SSL_PRIV_KEY_PASSWORD/g" ${CONF}
+    else
+        return 0
+    fi
+}
+
+if [[ ${FREERADIUS,,} == "true" ]]; then
+    usermod -a -G winbindd_priv freerad;
+    usermod -a -G root freerad;
+    chmod 755 -R /var/run/samba;
+    chown root:winbindd_priv /var/lib/samba/winbindd_privileged/;
+
+    clients_config
+    proxy_config
+    eap_config
+fi
+
+
 case "$1" in
   start)
     if [[ -f /etc/samba/external/smb.conf ]]; then
-      [ -w /etc/samba/smb.conf ] && cp /etc/samba/external/smb.conf /etc/samba/smb.conf
+      [ -w /etc/samba/smb.conf ] && cp -v /etc/samba/external/smb.conf /etc/samba/smb.conf
       appStart
     else
       echo "Config file is missing."

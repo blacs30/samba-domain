@@ -1,5 +1,45 @@
+ARG from=ubuntu:18.04
+FROM ${from} as build
+
+#
+#  Install build tools
+#
+RUN apt-get update
+RUN apt-get install -y devscripts equivs git quilt gcc
+
+#
+#  Create build directory
+#
+RUN mkdir -p /usr/local/src/repositories
+WORKDIR /usr/local/src/repositories
+
+#
+#  Shallow clone the FreeRADIUS source
+#
+ARG source=https://github.com/FreeRADIUS/freeradius-server.git
+ARG release=v3.0.x
+
+RUN git clone --depth 1 --single-branch --branch ${release} ${source}
+WORKDIR freeradius-server
+
+#
+#  Install build dependencies
+#
+RUN git checkout ${release}; \
+    if [ -e ./debian/control.in ]; then \
+        debian/rules debian/control; \
+    fi; \
+    echo 'y' | mk-build-deps -irt'apt-get -yV' debian/control
+
+#
+#  Build the server
+#
+RUN make -j2 deb
+
+#
+#  Clean environment and run the server
+#
 FROM ubuntu:18.04
-MAINTAINER Fmstrat <fmstrat@NOSPAM.NO>
 
 ENV DEBIAN_FRONTEND noninteractive
 
@@ -8,10 +48,33 @@ RUN apt-get update && apt-get upgrade -y
 # Install all apps
 # The third line is for multi-site config (ping is for testing later)
 RUN apt-get install -y pkg-config
-RUN apt-get install -y attr acl samba smbclient ldap-utils winbind libnss-winbind libpam-winbind krb5-user krb5-kdc supervisor
-RUN apt-get install -y openvpn inetutils-ping
+RUN apt-get install -y attr acl samba smbclient ldap-utils winbind libnss-winbind libpam-winbind krb5-user krb5-kdc supervisor samba samba-dsdb-modules samba-vfs-modules winbind busybox-static
+
+# Freeradius specific
+COPY --from=build /usr/local/src/repositories/*.deb /tmp/
+RUN apt-get update \
+  && apt-get install inetutils-ping -y /tmp/*.deb \
+  && apt-get clean \
+  && rm -r /var/lib/apt/lists/* /tmp/*.deb \
+  \
+  && ln -s /etc/freeradius /etc/raddb
+RUN apt-get autoremove && apt-get clean \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /var/spool/cron/crontabs; \
+  echo '* * * * * bash /etc/freeradius/create_acc_request.sh' > /var/spool/cron/crontabs/root
+
+ADD files/freeradius/ /etc/freeradius/
+# ADD files/krb5.conf.tpl /etc/krb5.conf.tpl
+# ADD files/smb.conf.tpl /etc/samba/smb.conf.tpl
+RUN cd /etc/freeradius/sites-enabled \
+  && ln -fs ../sites-available/copy-acct-to-home-server ./copy-acct-to-home-server
+
+VOLUME /var/log/freeradius
 
 # Set up script and run
-ADD init.sh /init.sh
-RUN chmod 755 /init.sh
+ADD *.sh /
+RUN chmod 755 /*.sh
 CMD /init.sh setup
+
+EXPOSE 1812/udp 1813/udp
