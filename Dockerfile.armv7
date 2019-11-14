@@ -1,4 +1,4 @@
-ARG from=arm64v8/ubuntu:18.04
+ARG from=ubuntu:bionic@sha256:349e3988c0241304b39218794b8263325f7dc517317e00be37d43c3bdda9449b
 FROM ${from} as build
 
 #
@@ -39,7 +39,7 @@ RUN make -j2 deb
 #
 #  Clean environment and run the server
 #
-FROM arm64v8/ubuntu:18.04
+FROM ubuntu:bionic@sha256:349e3988c0241304b39218794b8263325f7dc517317e00be37d43c3bdda9449b
 
 ENV DEBIAN_FRONTEND noninteractive
 
